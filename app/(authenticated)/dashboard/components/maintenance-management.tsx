@@ -159,7 +159,7 @@ export default function MaintenanceManagement() {
       
       if (latestError) throw latestError;
       
-      if (latestLog && latestLog.length > 0 && latestLog[0].id === editingMaintenanceLog.id) {
+      if (latestLog && latestLog.length > 0 && latestLog[0].performed_at === editingMaintenanceLog.performed_at) {
         const { error: updateError } = await supabase
           .from('cylinders')
           .update({ last_maintenance: editingMaintenanceLog.performed_at })
