@@ -29,11 +29,8 @@ export default function AnalyticsPage() {
 
         // Fetch cylinder counts by status
         const { data: cylinderStats, error: cylinderError } = await supabase
-          .from('cylinders')
-          .select('status, count')
-          .select('status')
-          .select('status', { count: 'exact' })
-          .group('status');
+          .from('cylinder_stats')
+          .select('*');
 
         if (cylinderError) throw cylinderError;
 
