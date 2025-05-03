@@ -1,10 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { createClient } from '@/utils/supabase/client';
 
 export default function BorrowPage() {
@@ -13,6 +14,8 @@ export default function BorrowPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const [location, setLocation] = useState<{ lat: number; lon: number } | null>(null);
+  const [availableWarehouses, setAvailableWarehouses] = useState<Array<{ id: string; name: string; distance: number; cylinder_id: string; lat: number; lon: number }>>([]);
+  const [selectedWarehouse, setSelectedWarehouse] = useState<string>('');
   const [formData, setFormData] = useState({
     fullName: '',
     phone: '',
@@ -22,6 +25,12 @@ export default function BorrowPage() {
   });
 
   // Get user's geolocation when component mounts
+  useEffect(() => {
+    if (location) {
+      fetchAvailableCylinders();
+    }
+  }, [location]);
+
   const getLocation = () => {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
@@ -51,6 +60,88 @@ export default function BorrowPage() {
     if (e.target.files && e.target.files.length > 0) {
       setFormData((prev) => ({ ...prev, ktpFile: e.target.files![0] }));
     }
+  };
+
+  // Fetch all available cylinders from all warehouses
+  const fetchAvailableCylinders = async () => {
+    if (!location) return;
+    
+    try {
+      setIsLoading(true);
+      const supabase = createClient();
+      
+      // Get all warehouses with available cylinders
+      const { data, error } = await supabase
+        .from('warehouses')
+        .select(`
+          id,
+          name,
+          lat,
+          lon,
+          cylinders!inner(id, status)
+        `)
+        .eq('cylinders.status', 'available');
+      
+      if (error) throw error;
+      
+      if (!data || data.length === 0) {
+        setAvailableWarehouses([]);
+        return;
+      }
+      
+      // Calculate distance from user to each warehouse
+      const warehousesWithDistance = data.map(warehouse => {
+        // Calculate distance using Haversine formula
+        const distance = calculateDistance(
+          location.lat,
+          location.lon,
+          warehouse.lat,
+          warehouse.lon
+        );
+        
+        return {
+          id: warehouse.id,
+          name: warehouse.name,
+          lat: warehouse.lat,
+          lon: warehouse.lon,
+          distance: distance,
+          cylinder_id: warehouse.cylinders[0].id // Take the first available cylinder
+        };
+      });
+      
+      // Sort by distance
+      warehousesWithDistance.sort((a, b) => a.distance - b.distance);
+      
+      setAvailableWarehouses(warehousesWithDistance);
+      
+      // Auto-select the nearest warehouse if available
+      if (warehousesWithDistance.length > 0) {
+        setSelectedWarehouse(warehousesWithDistance[0].id);
+      }
+    } catch (err: any) {
+      console.error('Error fetching available cylinders:', err);
+      setError(`Error finding available cylinders: ${err.message}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+  
+  // Calculate distance between two points using Haversine formula
+  const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
+    const R = 6371; // Radius of the earth in km
+    const dLat = deg2rad(lat2 - lat1);
+    const dLon = deg2rad(lon2 - lon1);
+    const a = 
+      Math.sin(dLat/2) * Math.sin(dLat/2) +
+      Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) * 
+      Math.sin(dLon/2) * Math.sin(dLon/2); 
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)); 
+    const distance = R * c; // Distance in km
+    return distance;
+  };
+  
+  const deg2rad = (deg: number) => {
+    return deg * (Math.PI/180);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -107,24 +198,23 @@ export default function BorrowPage() {
 
       const borrowerId = borrowerData[0].id;
 
-      // 3. Find nearest available cylinder
-      // This query uses PostGIS to find the nearest warehouse with available cylinders
-      const { data: nearestCylinder, error: cylinderError } = await supabase
-        .rpc('find_nearest_available_cylinder', {
-          user_lat: location.lat,
-          user_lon: location.lon,
-        });
-
-      if (cylinderError || !nearestCylinder || nearestCylinder.length === 0) {
-        throw new Error('No available cylinders found nearby. Please try again later.');
+      // 3. Get selected warehouse and cylinder
+      if (!selectedWarehouse || availableWarehouses.length === 0) {
+        throw new Error('Please select a warehouse with available cylinders');
+      }
+      
+      const selectedWarehouseData = availableWarehouses.find(w => w.id === selectedWarehouse);
+      
+      if (!selectedWarehouseData) {
+        throw new Error('Selected warehouse not found. Please try again.');
       }
 
       // 4. Create loan request
       const { error: loanError } = await supabase.from('loans').insert([
         {
           borrower_id: borrowerId,
-          cylinder_id: nearestCylinder[0].cylinder_id,
-          warehouse_id: nearestCylinder[0].warehouse_id,
+          cylinder_id: selectedWarehouseData.cylinder_id,
+          warehouse_id: selectedWarehouseData.id,
           status: 'requested',
           loan_photo_url: ktpUrl,
           expected_return_date: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(), // 14 days from now
@@ -174,11 +264,61 @@ export default function BorrowPage() {
 
             {location ? (
               <div className="bg-primary/10 text-primary rounded-xl p-4 text-sm">
-                <p>Location detected! We'll find the nearest available cylinder for you.</p>
+                <p>Location detected! You can select from any available warehouse.</p>
               </div>
             ) : (
               <div className="bg-muted rounded-xl p-4 text-sm">
-                <p>Please share your location to help us find the nearest available cylinder.</p>
+                <p>Please share your location to help us find available cylinders.</p>
+              </div>
+            )}
+            
+            {location && availableWarehouses.length > 0 && (
+              <div className="mt-4">
+                <Label htmlFor="warehouse">Select Warehouse</Label>
+                <Select
+                  value={selectedWarehouse}
+                  onValueChange={setSelectedWarehouse}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Select a warehouse" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availableWarehouses.map((warehouse) => (
+                      <SelectItem key={warehouse.id} value={warehouse.id}>
+                        {warehouse.name} ({warehouse.distance.toFixed(1)} km)
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {selectedWarehouse && (
+                  <div className="mt-2">
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      className="w-full flex items-center justify-center gap-2"
+                      onClick={() => {
+                        const warehouse = availableWarehouses.find(w => w.id === selectedWarehouse);
+                        if (warehouse) {
+                          const mapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${warehouse.lat},${warehouse.lon}`;
+                          window.open(mapsUrl, '_blank');
+                        }
+                      }}
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-map">
+                        <polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"/>
+                        <line x1="9" x2="9" y1="3" y2="18"/>
+                        <line x1="15" x2="15" y1="6" y2="21"/>
+                      </svg>
+                      Go to Maps
+                    </Button>
+                  </div>
+                )}
+              </div>
+            )}
+            
+            {location && availableWarehouses.length === 0 && (
+              <div className="mt-4 bg-yellow-50 border border-yellow-200 text-yellow-700 px-4 py-3 rounded-xl">
+                <p>No warehouses with available cylinders found. Please try again later.</p>
               </div>
             )}
           </div>
@@ -256,7 +396,7 @@ export default function BorrowPage() {
               </div>
             )}
 
-            <Button type="submit" className="w-full" disabled={isLoading || !location}>
+            <Button type="submit" className="w-full" disabled={isLoading || !location || !selectedWarehouse}>
               {isLoading ? 'Submitting...' : 'Submit Request'}
             </Button>
           </form>

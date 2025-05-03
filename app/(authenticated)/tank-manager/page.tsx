@@ -232,7 +232,6 @@ export default function DashboardPage() {
                         <th className="text-left py-3 px-4">Warehouse</th>
                         <th className="text-left py-3 px-4">Status</th>
                         <th className="text-left py-3 px-4">Last Maintenance</th>
-                        <th className="text-left py-3 px-4">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -256,11 +255,6 @@ export default function DashboardPage() {
                             {cylinder.last_maintenance
                               ? new Date(cylinder.last_maintenance).toLocaleDateString()
                               : 'Never'}
-                          </td>
-                          <td className="py-3 px-4">
-                            <Button variant="outline" size="sm" onClick={() => router.push(`/dashboard/cylinders/${cylinder.id}`)}>
-                              View Details
-                            </Button>
                           </td>
                         </tr>
                       ))}
