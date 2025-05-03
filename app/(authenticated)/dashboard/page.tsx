@@ -30,7 +30,7 @@ export default function AdminDashboard() {
           <p className="text-muted-foreground">Manage all OxyFlow data in one place</p>
         </div>
         <div className="flex items-center gap-4">
-          <Link href="/admin/analytics">
+          <Link href="/dashboard/analytics">
             <Button variant="outline">View Analytics</Button>
           </Link>
         </div>

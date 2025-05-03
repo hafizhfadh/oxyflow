@@ -75,7 +75,10 @@ export default function BorrowPage() {
       const ktpFileName = `${formData.ktpNumber}-${Date.now()}`;
       const { data: fileData, error: uploadError } = await supabase.storage
         .from('oxy_docs')
-        .upload(ktpFileName, formData.ktpFile);
+        .upload(ktpFileName, formData.ktpFile, {
+          cacheControl: '3600',
+          upsert: false
+        });
 
       if (uploadError) {
         throw new Error(`Error uploading KTP: ${uploadError.message}`);
